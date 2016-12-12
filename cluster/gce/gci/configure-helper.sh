@@ -835,7 +835,7 @@ function start-kube-apiserver {
     webhook_authn_config_volume="{\"name\": \"webhookauthnconfigmount\",\"hostPath\": {\"path\": \"/etc/gcp_authn.config\"}},"
   fi
 
-  params+=" --authorization-mode=ABAC"
+  params+=" --authorization-mode=RBAC,ABAC"
   local webhook_config_mount=""
   local webhook_config_volume=""
   if [[ -n "${GCP_AUTHZ_URL:-}" ]]; then
