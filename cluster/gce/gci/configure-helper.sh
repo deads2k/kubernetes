@@ -388,7 +388,8 @@ users:
 clusters:
 - name: local
   cluster:
-    certificate-authority-data: ${CA_CERT}
+    insecure-skip-tls-verify: true
+    server: https://127.0.0.1:443
 contexts:
 - context:
     cluster: local
