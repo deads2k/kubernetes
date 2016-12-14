@@ -378,6 +378,7 @@ EOF
 
 function create-kubecontrollermanager-kubeconfig {
   echo "Creating kube-controller-manager kubeconfig file"
+  mdkir -p /var/lib/kube-controller-manager
   cat <<EOF >/var/lib/kube-controller-manager/kubeconfig
 apiVersion: v1
 kind: Config
@@ -918,13 +919,13 @@ function start-kube-apiserver {
 #   DOCKER_REGISTRY
 function start-kube-controller-manager {
   echo "Start kubernetes controller-manager"
+  create-kubecontrollermanager-kubeconfig
   prepare-log-file /var/log/kube-controller-manager.log
   # Calculate variables and assemble the command line.
   local params="${CONTROLLER_MANAGER_TEST_LOG_LEVEL:-"--v=2"} ${CONTROLLER_MANAGER_TEST_ARGS:-} ${CLOUD_CONFIG_OPT}"
   params+=" --use-service-account-credentials"
   params+=" --cloud-provider=gce"
   params+=" --kubeconfig=/var/lib/kube-controller-manager/kubeconfig"
-  params+=" --master=127.0.0.1:8080"
   params+=" --root-ca-file=/etc/srv/kubernetes/ca.crt"
   params+=" --service-account-private-key-file=/etc/srv/kubernetes/server.key"
   if [[ -n "${ENABLE_GARBAGE_COLLECTOR:-}" ]]; then
@@ -1283,7 +1284,6 @@ if [[ "${KUBERNETES_MASTER:-}" == "true" ]]; then
   create-master-auth
   create-master-kubelet-auth
   create-master-etcd-auth
-  create-kubecontrollermanager-kubeconfig
 else
   create-kubelet-kubeconfig
   create-kubeproxy-kubeconfig
