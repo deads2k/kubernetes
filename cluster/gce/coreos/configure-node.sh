@@ -270,9 +270,8 @@ function create-salt-master-auth() {
     mkdir -p /srv/salt-overlay/salt/kube-apiserver
     (umask 077;
       echo "${KUBE_BEARER_TOKEN},admin,admin" > "${KNOWN_TOKENS_FILE}";
-      echo "${KUBE_CONTROLLER_MANAGER_TOKEN},system:kube-controller-manager,system:masters" >> "${KNOWN_TOKENS_FILE}";
-      echo "${KUBELET_TOKEN},kubelet,\"kubelet,system:nodes\"" >> "${KNOWN_TOKENS_FILE}";
-      echo "${KUBE_PROXY_TOKEN},kube_proxy,\"kube_proxy,system:nodes\"" >> "${KNOWN_TOKENS_FILE}")
+      echo "${KUBELET_TOKEN},kubelet,kubelet" >> "${KNOWN_TOKENS_FILE}";
+      echo "${KUBE_PROXY_TOKEN},kube_proxy,kube_proxy" >> "${KNOWN_TOKENS_FILE}")
 
     # Generate tokens for other "service accounts".  Append to known_tokens.
     #

@@ -208,7 +208,6 @@ function create-master-auth {
   local -r known_tokens_csv="${auth_dir}/known_tokens.csv"
   if [[ ! -e "${known_tokens_csv}" ]]; then
     echo "${KUBE_BEARER_TOKEN},admin,admin" > "${known_tokens_csv}"
-    echo "${KUBE_CONTROLLER_MANAGER_TOKEN},system:kube-controller-manager,system:masters" >> "${known_tokens_csv}"
     echo "${KUBELET_TOKEN},kubelet,\"kubelet,system:nodes\"" >> "${known_tokens_csv}"
     echo "${KUBE_PROXY_TOKEN},kube_proxy,\"kube_proxy,system:nodes\"" >> "${known_tokens_csv}"
   fi
@@ -371,29 +370,6 @@ contexts:
 - context:
     cluster: local
     user: kube-proxy
-  name: service-account-context
-current-context: service-account-context
-EOF
-}
-
-function create-kubecontrollermanager-kubeconfig {
-  echo "Creating kube-controller-manager kubeconfig file"
-  cat <<EOF >/var/lib/kube-controller-manager/kubeconfig
-apiVersion: v1
-kind: Config
-users:
-- name: kube-controller-manager
-  user:
-    token: ${KUBE_CONTROLLER_MANAGER_TOKEN}
-clusters:
-- name: local
-  cluster:
-    certificate-authority-data: ${CA_CERT}
-    server: https://127.0.0.1:443
-contexts:
-- context:
-    cluster: local
-    user: kube-controller-manager
   name: service-account-context
 current-context: service-account-context
 EOF
@@ -923,7 +899,7 @@ function start-kube-controller-manager {
   local params="${CONTROLLER_MANAGER_TEST_LOG_LEVEL:-"--v=2"} ${CONTROLLER_MANAGER_TEST_ARGS:-} ${CLOUD_CONFIG_OPT}"
   params+=" --use-service-account-credentials"
   params+=" --cloud-provider=gce"
-  params+=" --kubeconfig=/var/lib/kube-controller-manager/kubeconfig"
+  params+=" --master=127.0.0.1:8080"
   params+=" --root-ca-file=/etc/srv/kubernetes/ca.crt"
   params+=" --service-account-private-key-file=/etc/srv/kubernetes/server.key"
   if [[ -n "${ENABLE_GARBAGE_COLLECTOR:-}" ]]; then
@@ -1282,7 +1258,6 @@ if [[ "${KUBERNETES_MASTER:-}" == "true" ]]; then
   create-master-auth
   create-master-kubelet-auth
   create-master-etcd-auth
-  create-kubecontrollermanager-kubeconfig
 else
   create-kubelet-kubeconfig
   create-kubeproxy-kubeconfig

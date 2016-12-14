@@ -310,9 +310,8 @@ create_master_auth() {
   readonly known_tokens_csv="${auth_dir}/known_tokens.csv"
   if [ ! -e "${known_tokens_csv}" ]; then
     echo "${KUBE_BEARER_TOKEN},admin,admin" > "${known_tokens_csv}"
-    echo "${KUBE_CONTROLLER_MANAGER_TOKEN},system:kube-controller-manager,system:masters" >> "${known_tokens_csv}"
-    echo "${KUBELET_TOKEN},kubelet,\"kubelet,system:nodes\"" >> "${known_tokens_csv}"
-    echo "${KUBE_PROXY_TOKEN},kube_proxy,\"kube_proxy,system:nodes\"" >> "${known_tokens_csv}"
+    echo "${KUBELET_TOKEN},kubelet,kubelet" >> "${known_tokens_csv}"
+    echo "${KUBE_PROXY_TOKEN},kube_proxy,kube_proxy" >> "${known_tokens_csv}"
   fi
 
   use_cloud_config="false"
