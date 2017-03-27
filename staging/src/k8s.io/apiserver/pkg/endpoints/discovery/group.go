@@ -28,15 +28,15 @@ import (
 	"k8s.io/apiserver/pkg/endpoints/handlers/responsewriters"
 )
 
-// apiGroupDiscoveryHandler creates a webservice serving the supported versions, preferred version, and name
+// APIGroupDiscoveryHandler creates a webservice serving the supported versions, preferred version, and name
 // of a group. E.g., such a web service will be registered at /apis/extensions.
-type apiGroupDiscoveryHandler struct {
+type APIGroupDiscoveryHandler struct {
 	serializer runtime.NegotiatedSerializer
 
 	group metav1.APIGroup
 }
 
-func NewAPIGroupDiscoveryHandler(serializer runtime.NegotiatedSerializer, group metav1.APIGroup) *apiGroupDiscoveryHandler {
+func NewAPIGroupDiscoveryHandler(serializer runtime.NegotiatedSerializer, group metav1.APIGroup) *APIGroupDiscoveryHandler {
 	if keepUnversioned(group.Name) {
 		// Because in release 1.1, /apis/extensions returns response with empty
 		// APIVersion, we use stripVersionNegotiatedSerializer to keep the
@@ -44,13 +44,13 @@ func NewAPIGroupDiscoveryHandler(serializer runtime.NegotiatedSerializer, group 
 		serializer = stripVersionNegotiatedSerializer{serializer}
 	}
 
-	return &apiGroupDiscoveryHandler{
+	return &APIGroupDiscoveryHandler{
 		serializer: serializer,
 		group:      group,
 	}
 }
 
-func (s *apiGroupDiscoveryHandler) WebService() *restful.WebService {
+func (s *APIGroupDiscoveryHandler) WebService() *restful.WebService {
 	mediaTypes, _ := negotiation.MediaTypesForSerializer(s.serializer)
 	ws := new(restful.WebService)
 	ws.Path(APIGroupPrefix + "/" + s.group.Name)
@@ -65,6 +65,10 @@ func (s *apiGroupDiscoveryHandler) WebService() *restful.WebService {
 }
 
 // handle returns a handler which will return the api.GroupAndVersion of the group.
-func (s *apiGroupDiscoveryHandler) handle(req *restful.Request, resp *restful.Response) {
-	responsewriters.WriteObjectNegotiated(s.serializer, schema.GroupVersion{}, resp.ResponseWriter, req.Request, http.StatusOK, &s.group)
+func (s *APIGroupDiscoveryHandler) handle(req *restful.Request, resp *restful.Response) {
+	s.ServeHTTP(resp.ResponseWriter, req.Request)
+}
+
+func (s *APIGroupDiscoveryHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	responsewriters.WriteObjectNegotiated(s.serializer, schema.GroupVersion{}, w, req, http.StatusOK, &s.group)
 }

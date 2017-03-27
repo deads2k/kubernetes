@@ -1,0 +1,6 @@
+apiVersion: mygroup.example.com/v1alpha1
+kind: FirstTPR
+metadata:
+  name: sample-name
+spec:
+  key: value

@@ -23,6 +23,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	genericapiserver "k8s.io/apiserver/pkg/server"
 	genericoptions "k8s.io/apiserver/pkg/server/options"
 	"k8s.io/kube-apiextension-server/pkg/apis/apiextensions/v1alpha1"
@@ -94,8 +95,19 @@ func (o APIExtensionsServerOptions) Config() (*apiserver.Config, error) {
 		return nil, err
 	}
 
+	tprRESTOptionsGetter := apiserver.TPRRESTOptionsGetter{
+		StorageConfig:           o.RecommendedOptions.Etcd.StorageConfig,
+		StoragePrefix:           o.RecommendedOptions.Etcd.StorageConfig.Prefix,
+		EnableWatchCache:        o.RecommendedOptions.Etcd.EnableWatchCache,
+		EnableGarbageCollection: o.RecommendedOptions.Etcd.EnableGarbageCollection,
+		DeleteCollectionWorkers: o.RecommendedOptions.Etcd.DeleteCollectionWorkers,
+	}
+	tprRESTOptionsGetter.StorageConfig.Codec = unstructured.UnstructuredJSONScheme
+	tprRESTOptionsGetter.StorageConfig.Copier = apiserver.UnstructuredCopier{}
+
 	config := &apiserver.Config{
-		GenericConfig: serverConfig,
+		GenericConfig:        serverConfig,
+		TPRRESTOptionsGetter: tprRESTOptionsGetter,
 	}
 	return config, nil
 }
@@ -106,7 +118,7 @@ func (o APIExtensionsServerOptions) RunAPIExtensionsServer(stopCh <-chan struct{
 		return err
 	}
 
-	server, err := config.Complete().New()
+	server, err := config.Complete().NewWithDelegate(genericapiserver.EmptyDelegate, stopCh)
 	if err != nil {
 		return err
 	}

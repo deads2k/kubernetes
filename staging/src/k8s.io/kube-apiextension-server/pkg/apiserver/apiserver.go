@@ -17,6 +17,8 @@ limitations under the License.
 package apiserver
 
 import (
+	"time"
+
 	"k8s.io/apimachinery/pkg/apimachinery/announced"
 	"k8s.io/apimachinery/pkg/apimachinery/registered"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -24,19 +26,17 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/apimachinery/pkg/version"
+	"k8s.io/apiserver/pkg/endpoints/discovery"
+	genericregistry "k8s.io/apiserver/pkg/registry/generic"
 	"k8s.io/apiserver/pkg/registry/rest"
 	genericapiserver "k8s.io/apiserver/pkg/server"
 
 	"k8s.io/kube-apiextension-server/pkg/apis/apiextensions"
 	"k8s.io/kube-apiextension-server/pkg/apis/apiextensions/install"
 	"k8s.io/kube-apiextension-server/pkg/apis/apiextensions/v1alpha1"
+	"k8s.io/kube-apiextension-server/pkg/client/clientset/internalclientset"
+	internalinformers "k8s.io/kube-apiextension-server/pkg/client/informers/internalversion"
 	thirdpartystorage "k8s.io/kube-apiextension-server/pkg/registry/thirdparty"
-
-	// make sure the generated client works
-	_ "k8s.io/kube-apiextension-server/pkg/client/clientset/clientset"
-	_ "k8s.io/kube-apiextension-server/pkg/client/clientset/internalclientset"
-	_ "k8s.io/kube-apiextension-server/pkg/client/informers/externalversions"
-	_ "k8s.io/kube-apiextension-server/pkg/client/informers/internalversion"
 )
 
 var (
@@ -64,6 +64,8 @@ func init() {
 
 type Config struct {
 	GenericConfig *genericapiserver.Config
+
+	TPRRESTOptionsGetter genericregistry.RESTOptionsGetter
 }
 
 type APIExtensions struct {
@@ -76,6 +78,7 @@ type completedConfig struct {
 
 // Complete fills in any fields not set that are required to have valid data. It's mutating the receiver.
 func (c *Config) Complete() completedConfig {
+	c.GenericConfig.EnableDiscovery = false
 	c.GenericConfig.Complete()
 
 	c.GenericConfig.Version = &version.Info{
@@ -92,7 +95,7 @@ func (c *Config) SkipComplete() completedConfig {
 }
 
 // New returns a new instance of APIExtensions from the given config.
-func (c completedConfig) New() (*APIExtensions, error) {
+func (c completedConfig) NewWithDelegate(delegationTarget genericapiserver.DelegationTarget, stopCh <-chan struct{}) (*APIExtensions, error) {
 	genericServer, err := c.Config.GenericConfig.SkipComplete().New() // completion is done in Complete, no need for a second time
 	if err != nil {
 		return nil, err
@@ -111,6 +114,42 @@ func (c completedConfig) New() (*APIExtensions, error) {
 	if err := s.GenericAPIServer.InstallAPIGroup(&apiGroupInfo); err != nil {
 		return nil, err
 	}
+
+	thirdPartyClient, err := internalclientset.NewForConfig(s.GenericAPIServer.LoopbackClientConfig)
+	if err != nil {
+		return nil, err
+	}
+	thirdPartyInformers := internalinformers.NewSharedInformerFactory(thirdPartyClient, 5*time.Minute)
+
+	versionDiscoveryHandler := &tprVersionDiscoveryHandler{
+		discovery: map[schema.GroupVersion]*discovery.APIVersionDiscoveryHandler{},
+		delegate:  delegationTarget.UnprotectedHandler(),
+	}
+	groupDiscoveryHandler := &tprGroupDiscoveryHandler{
+		discovery: map[string]*discovery.APIGroupDiscoveryHandler{},
+		delegate:  delegationTarget.UnprotectedHandler(),
+	}
+	tprHandler := &tprHandler{
+		versionDiscoveryHandler: versionDiscoveryHandler,
+		groupDiscoveryHandler:   groupDiscoveryHandler,
+		requestContextMapper:    s.GenericAPIServer.RequestContextMapper(),
+		thirdPartyLister:        thirdPartyInformers.Apiextensions().InternalVersion().ThirdParties().Lister(),
+		delegate:                delegationTarget.UnprotectedHandler(),
+		restOptionsGetter:       c.TPRRESTOptionsGetter,
+		admission:               c.GenericConfig.AdmissionControl,
+	}
+	s.GenericAPIServer.FallThroughHandler.Handle("/apis/", tprHandler)
+
+	tprController := NewTPRDiscoveryController(thirdPartyInformers.Apiextensions().InternalVersion().ThirdParties(), versionDiscoveryHandler, groupDiscoveryHandler)
+
+	s.GenericAPIServer.AddPostStartHook("start-apiextensions-informers", func(context genericapiserver.PostStartHookContext) error {
+		thirdPartyInformers.Start(stopCh)
+		return nil
+	})
+	s.GenericAPIServer.AddPostStartHook("start-apiextensions-controllers", func(context genericapiserver.PostStartHookContext) error {
+		go tprController.Run(stopCh)
+		return nil
+	})
 
 	return s, nil
 }
