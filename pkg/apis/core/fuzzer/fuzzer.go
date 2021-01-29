@@ -21,10 +21,12 @@ import (
 	"strconv"
 	"time"
 
-	fuzz "github.com/google/gofuzz"
+	"k8s.io/apimachinery/pkg/util/uuid"
 
+	fuzz "github.com/google/gofuzz"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metafuzzer "k8s.io/apimachinery/pkg/apis/meta/fuzzer"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -301,6 +303,35 @@ var Funcs = func(codecs runtimeserializer.CodecFactory) []interface{} {
 			ct.TerminationMessagePath = "/" + ct.TerminationMessagePath // Must be non-empty
 			ct.TerminationMessagePolicy = "File"
 		},
+		func(p *core.Taint, c fuzz.Continue) {
+			c.FuzzNoCustom(p) // fuzz self without calling this function again
+			if p == nil {
+				return
+			}
+
+			p.Key = metafuzzer.RandomDNSLabel(c)
+			switch c.Rand.Int31n(3) {
+			case 0:
+				p.Effect = core.TaintEffectNoSchedule
+			case 1:
+				p.Effect = core.TaintEffectNoExecute
+			case 2:
+				p.Effect = core.TaintEffectPreferNoSchedule
+			}
+			p.Value = metafuzzer.RandomDNSLabel(c)
+		},
+		func(p *core.ConfigMapNodeConfigSource, c fuzz.Continue) {
+			c.FuzzNoCustom(p) // fuzz self without calling this function again
+			if p == nil {
+				return
+			}
+
+			p.UID = ""
+			p.ResourceVersion = ""
+			p.Name = metafuzzer.RandomDNSLabel(c)
+			p.Namespace = metafuzzer.RandomDNSLabel(c)
+			p.KubeletConfigKey = metafuzzer.RandomDNSLabel(c)
+		},
 		func(ep *core.EphemeralContainer, c fuzz.Continue) {
 			c.FuzzNoCustom(ep)                                                                   // fuzz self without calling this function again
 			ep.EphemeralContainerCommon.TerminationMessagePath = "/" + ep.TerminationMessagePath // Must be non-empty
@@ -511,7 +542,21 @@ var Funcs = func(codecs runtimeserializer.CodecFactory) []interface{} {
 		},
 		func(s *core.NodeStatus, c fuzz.Continue) {
 			c.FuzzNoCustom(s)
+
 			s.Allocatable = s.Capacity
+
+			if s.Config != nil && s.Config.LastKnownGood != nil && s.Config.LastKnownGood.ConfigMap != nil {
+				s.Config.LastKnownGood.ConfigMap.UID = uuid.NewUUID()
+				s.Config.LastKnownGood.ConfigMap.ResourceVersion = c.RandString()
+			}
+			if s.Config != nil && s.Config.Assigned != nil && s.Config.Assigned.ConfigMap != nil {
+				s.Config.Assigned.ConfigMap.UID = uuid.NewUUID()
+				s.Config.Assigned.ConfigMap.ResourceVersion = c.RandString()
+			}
+			if s.Config != nil && s.Config.Active != nil && s.Config.Active.ConfigMap != nil {
+				s.Config.Active.ConfigMap.UID = uuid.NewUUID()
+				s.Config.Active.ConfigMap.ResourceVersion = c.RandString()
+			}
 		},
 		func(e *core.Event, c fuzz.Continue) {
 			c.FuzzNoCustom(e)

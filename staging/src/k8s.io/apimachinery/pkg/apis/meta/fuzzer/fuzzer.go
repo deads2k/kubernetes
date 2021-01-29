@@ -137,7 +137,7 @@ func randomLabelPart(c fuzz.Continue, canBeEmpty bool) string {
 	return string(runes)
 }
 
-func randomDNSLabel(c fuzz.Continue) string {
+func RandomDNSLabel(c fuzz.Continue) string {
 	validStartEnd := []charRange{{'0', '9'}, {'a', 'z'}}
 	validMiddle := []charRange{{'0', '9'}, {'a', 'z'}, {'-', '-'}}
 
@@ -163,7 +163,7 @@ func randomLabelKey(c fuzz.Continue) string {
 		prefixPartsLen := c.Rand.Intn(2) + 1
 		prefixParts := make([]string, prefixPartsLen)
 		for i := range prefixParts {
-			prefixParts[i] = randomDNSLabel(c)
+			prefixParts[i] = RandomDNSLabel(c)
 		}
 		prefixPart = strings.Join(prefixParts, ".") + "/"
 	}
@@ -203,21 +203,41 @@ func v1FuzzerFuncs(codecs runtimeserializer.CodecFactory) []interface{} {
 			} else {
 				delete(j.Labels, "")
 			}
+			for k := range j.Labels {
+				j.Labels[RandomDNSLabel(c)] = randomLabelPart(c, true)
+				delete(j.Labels, k)
+			}
+
 			if len(j.Annotations) == 0 {
 				j.Annotations = nil
 			} else {
 				delete(j.Annotations, "")
 			}
+			for k := range j.Annotations {
+				j.Annotations[RandomDNSLabel(c)] = randomLabelPart(c, true)
+				delete(j.Annotations, k)
+			}
+
 			if len(j.OwnerReferences) == 0 {
 				j.OwnerReferences = nil
 			}
 			if len(j.Finalizers) == 0 {
 				j.Finalizers = nil
 			}
+			for i := 0; i < len(j.Finalizers); i++ {
+				j.Finalizers[i] = RandomDNSLabel(c) + "/" + RandomDNSLabel(c)
+			}
 		},
 		func(j *metav1.ResourceVersionMatch, c fuzz.Continue) {
 			matches := []metav1.ResourceVersionMatch{"", metav1.ResourceVersionMatchExact, metav1.ResourceVersionMatchNotOlderThan}
 			*j = matches[c.Rand.Intn(len(matches))]
+		},
+		func(j *metav1.OwnerReference, c fuzz.Continue) {
+			c.FuzzNoCustom(j)
+
+			if len(j.APIVersion) == 0 {
+				j.APIVersion = RandomDNSLabel(c)
+			}
 		},
 		func(j *metav1.ListMeta, c fuzz.Continue) {
 			j.ResourceVersion = strconv.FormatUint(c.RandUint64(), 10)
