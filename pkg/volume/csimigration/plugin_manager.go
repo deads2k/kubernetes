@@ -38,6 +38,8 @@ type PluginNameMapper interface {
 type PluginManager struct {
 	PluginNameMapper
 	featureGate featuregate.FeatureGate
+
+	useKCMPluginManagerFeatureGates bool
 }
 
 // NewPluginManager returns a new PluginManager instance
@@ -53,6 +55,10 @@ func NewPluginManager(m PluginNameMapper, featureGate featuregate.FeatureGate) P
 // 1. Enable CSIMigrationXX for the plugin
 // 2. Unregister the in-tree plugin by setting the InTreePluginXXUnregister feature gate
 func (pm PluginManager) IsMigrationCompleteForPlugin(pluginName string) bool {
+	if pm.useKCMPluginManagerFeatureGates {
+		return pm.kcmIsMigrationCompleteForPlugin(pluginName)
+	}
+
 	// CSIMigration feature and plugin specific InTreePluginUnregister feature flags should
 	// be enabled for plugin specific migration completion to be take effect
 	if !pm.IsMigrationEnabledForPlugin(pluginName) {
@@ -80,6 +86,10 @@ func (pm PluginManager) IsMigrationCompleteForPlugin(pluginName string) bool {
 // IsMigrationEnabledForPlugin indicates whether CSI migration has been enabled
 // for a particular storage plugin
 func (pm PluginManager) IsMigrationEnabledForPlugin(pluginName string) bool {
+	if pm.useKCMPluginManagerFeatureGates {
+		return pm.kcmIsMigrationEnabledForPlugin(pluginName)
+	}
+
 	// CSIMigration feature should be enabled along with the plugin-specific one
 	if !pm.featureGate.Enabled(features.CSIMigration) {
 		return false
