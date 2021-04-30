@@ -23,7 +23,7 @@ func SetRequestCountsForNode(nodeName string, currentHour, expiredHour int, coun
 		updatedCounts.Add(countsToPersist)
 		hourlyRequestLogs := resourceRequestCountToHourlyNodeRequestLog(nodeName, maxNumUsers, updatedCounts)
 
-		newStatus := setRequestCountsForNode(status, nodeName, currentHour, expiredHour, hourlyRequestLogs)
+		newStatus := setRequestCountsForNode(status, nodeName, currentHour, expiredHour, maxNumUsers, hourlyRequestLogs)
 		status.Last24h = newStatus.Last24h
 		status.CurrentHour = newStatus.CurrentHour
 		status.RemovedInRelease = removedRelease(countsToPersist.resource)
@@ -31,7 +31,7 @@ func SetRequestCountsForNode(nodeName string, currentHour, expiredHour int, coun
 	}
 }
 
-func setRequestCountsForNode(status *apiv1.APIRequestCountStatus, nodeName string, currentHour, expiredHour int, hourlyNodeRequests []apiv1.PerNodeAPIRequestLog) *apiv1.APIRequestCountStatus {
+func setRequestCountsForNode(status *apiv1.APIRequestCountStatus, nodeName string, currentHour, expiredHour, maxNumUsers int, hourlyNodeRequests []apiv1.PerNodeAPIRequestLog) *apiv1.APIRequestCountStatus {
 	newStatus := status.DeepCopy()
 	newStatus.Last24h = []apiv1.PerResourceAPIRequestLog{}
 	newStatus.CurrentHour = apiv1.PerResourceAPIRequestLog{}
@@ -66,7 +66,7 @@ func setRequestCountsForNode(status *apiv1.APIRequestCountStatus, nodeName strin
 	newStatus.RequestCount = totalRequestsThisDay
 
 	// get all our sorting before copying
-	canonicalizeStatus(newStatus)
+	canonicalizeStatus(newStatus, nodeName, maxNumUsers)
 	newStatus.CurrentHour = newStatus.Last24h[currentHour]
 
 	return newStatus
@@ -144,7 +144,7 @@ func apiStatusToRequestCount(resource schema.GroupVersionResource, status *apiv1
 	return requestCount
 }
 
-func canonicalizeStatus(status *apiv1.APIRequestCountStatus) {
+func canonicalizeStatus(status *apiv1.APIRequestCountStatus, nodeName string, maxNumUsers int) {
 	for hour := range status.Last24h {
 		hourlyCount := status.Last24h[hour]
 		for j := range hourlyCount.ByNode {
@@ -154,10 +154,14 @@ func canonicalizeStatus(status *apiv1.APIRequestCountStatus) {
 				sort.Stable(byVerb(userCount.ByVerb))
 			}
 			sort.Stable(sort.Reverse(byNumberOfUserRequests(nodeCount.ByUser)))
+			// we prune here as well to remove the old entries.  But only for *this* node to avoid throwing
+			// of counts for other nodes
+			if len(nodeCount.ByUser) > maxNumUsers && nodeCount.NodeName == nodeName {
+				hourlyCount.ByNode[j].ByUser = nodeCount.ByUser[:maxNumUsers]
+			}
 		}
 		sort.Stable(byNode(status.Last24h[hour].ByNode))
 	}
-
 }
 
 type byVerb []apiv1.PerVerbAPIRequestCount

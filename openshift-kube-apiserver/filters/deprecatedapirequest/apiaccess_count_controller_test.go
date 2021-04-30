@@ -1,6 +1,7 @@
 package deprecatedapirequest
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -208,6 +209,7 @@ func TestSetRequestCountsForNode(t *testing.T) {
 		name            string
 		nodeName        string
 		expiredHour     int
+		maxNumUsers     int
 		countsToPersist *resourceRequestCounts
 		status          *apiv1.APIRequestCountStatus
 		expected        *apiv1.APIRequestCountStatus
@@ -553,12 +555,131 @@ func TestSetRequestCountsForNode(t *testing.T) {
 				setRequestCountTotals,
 			),
 		},
+		{
+			name:        "MaxCountCleanupOldAndExistingAndNew",
+			nodeName:    "node1",
+			expiredHour: 5,
+			maxNumUsers: 1,
+			countsToPersist: resource("test.v1.group",
+				withHour(4,
+					withUser("mia", withCounts("get", 305)),
+					withUser("ivy", withCounts("create", 1113)),
+					withUser("zoe", withCounts("patch", 1217), withCounts("delete", 1386)),
+				),
+			),
+			status: deprecatedAPIRequestStatus(
+				withRequestLastHour(withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(0, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(1, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(2, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(3,
+					withPerNodeAPIRequestLog("node1",
+						withPerUserAPIRequestCount("mia", withRequestCount("delete", 1386)),
+						withPerUserAPIRequestCount("bob", withRequestCount("get", 387)),
+					),
+					withPerNodeAPIRequestLog("node2",
+						withPerUserAPIRequestCount("mia", withRequestCount("delete", 5449)),
+						withPerUserAPIRequestCount("bob", withRequestCount("get", 263)),
+					),
+				),
+				withRequestLast24h(4,
+					withPerNodeAPIRequestLog("node1",
+						withPerUserAPIRequestCount("eva", withRequestCount("get", 625), withRequestCount("watch", 540)),
+						withPerUserAPIRequestCount("bob", withRequestCount("get", 780)),
+					),
+					withPerNodeAPIRequestLog("node2",
+						withPerUserAPIRequestCount("bob", withRequestCount("get", 675)),
+						withPerUserAPIRequestCount("mia", withRequestCount("delete", 192)),
+					),
+				),
+				withRequestLast24h(6, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(7, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(8, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(9, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(10, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(11, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(12, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(13, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(14, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(15, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(16, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(17, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(18, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(19, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(20, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(21, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(22, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(23, withPerNodeAPIRequestLog("node1")),
+				setRequestCountTotals,
+			),
+			expected: deprecatedAPIRequestStatus(
+				withRequestLastHour(
+					withPerNodeAPIRequestLog("node1",
+						withPerNodeRequestCount(5966),
+						withPerUserAPIRequestCount("zoe", withRequestCount("delete", 1386), withRequestCount("patch", 1217)),
+					),
+					withPerNodeAPIRequestLog("node2",
+						withPerUserAPIRequestCount("bob", withRequestCount("get", 675)),
+						withPerUserAPIRequestCount("mia", withRequestCount("delete", 192)),
+					),
+				),
+				withRequestLast24h(0, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(1, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(2, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(3,
+					withPerNodeAPIRequestLog("node1",
+						withPerNodeRequestCount(1773),
+						withPerUserAPIRequestCount("mia", withRequestCount("delete", 1386)),
+					),
+					withPerNodeAPIRequestLog("node2",
+						withPerUserAPIRequestCount("mia", withRequestCount("delete", 5449)),
+						withPerUserAPIRequestCount("bob", withRequestCount("get", 263)),
+					),
+				),
+				withRequestLast24h(4,
+					withPerNodeAPIRequestLog("node1",
+						withPerNodeRequestCount(5966),
+						withPerUserAPIRequestCount("zoe", withRequestCount("delete", 1386), withRequestCount("patch", 1217)),
+					),
+					withPerNodeAPIRequestLog("node2",
+						withPerUserAPIRequestCount("bob", withRequestCount("get", 675)),
+						withPerUserAPIRequestCount("mia", withRequestCount("delete", 192)),
+					),
+				),
+				withRequestLast24h(6, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(7, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(8, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(9, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(10, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(11, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(12, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(13, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(14, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(15, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(16, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(17, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(18, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(19, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(20, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(21, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(22, withPerNodeAPIRequestLog("node1")),
+				withRequestLast24h(23, withPerNodeAPIRequestLog("node1")),
+				setRequestCountTotals,
+			),
+		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			currentHour := tc.expiredHour - 1
-			SetRequestCountsForNode(tc.nodeName, currentHour, tc.expiredHour, tc.countsToPersist)(10, tc.status)
-			assert.Equal(t, tc.expected, tc.status)
+			maxUsers := 10
+			if tc.maxNumUsers > 0 {
+				maxUsers = tc.maxNumUsers
+			}
+			SetRequestCountsForNode(tc.nodeName, currentHour, tc.expiredHour, tc.countsToPersist)(maxUsers, tc.status)
+
+			if !reflect.DeepEqual(tc.expected, tc.status) {
+				t.Error(diff.ObjectDiff(tc.expected, tc.status))
+			}
 		})
 	}
 
