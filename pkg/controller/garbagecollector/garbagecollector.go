@@ -316,45 +316,46 @@ func (gc *GarbageCollector) attemptToDeleteWorker(ctx context.Context) bool {
 			// this can happen if attemptToDelete loops on a requeued virtual node because attemptToDeleteItem returned an error,
 			// and in the meantime a deletion of the real object associated with that uid was observed
 			klog.V(5).Infof("item %s no longer in the graph, skipping attemptToDeleteItem", n)
+			gc.attemptToDelete.Forget(item)
 			return true
 		}
 		if nodeFromGraph.isObserved() {
 			// this can happen if attemptToDelete loops on a requeued virtual node because attemptToDeleteItem returned an error,
 			// and in the meantime the real object associated with that uid was observed
 			klog.V(5).Infof("item %s no longer virtual in the graph, skipping attemptToDeleteItem on virtual node", n)
+			gc.attemptToDelete.Forget(item)
 			return true
 		}
 	}
 
 	err := gc.attemptToDeleteItem(ctx, n)
-	if err == enqueuedVirtualDeleteEventErr {
-		// a virtual event was produced and will be handled by processGraphChanges, no need to requeue this node
+	if (err == nil && n.isObserved()) || err == enqueuedVirtualDeleteEventErr || err == namespacedOwnerOfClusterScopedObjectErr {
+		// case 1: a virtual event was produced and will be handled by processGraphChanges, no need to requeue this node
+		// case 2: a cluster-scoped object referring to a namespaced owner is an error that will not resolve on retry, no need to requeue this node
+		gc.attemptToDelete.Forget(item)
 		return true
-	} else if err == namespacedOwnerOfClusterScopedObjectErr {
-		// a cluster-scoped object referring to a namespaced owner is an error that will not resolve on retry, no need to requeue this node
-		return true
-	} else if err != nil {
-		if _, ok := err.(*restMappingError); ok {
-			// There are at least two ways this can happen:
-			// 1. The reference is to an object of a custom type that has not yet been
-			//    recognized by gc.restMapper (this is a transient error).
-			// 2. The reference is to an invalid group/version. We don't currently
-			//    have a way to distinguish this from a valid type we will recognize
-			//    after the next discovery sync.
-			// For now, record the error and retry.
-			klog.V(5).Infof("error syncing item %s: %v", n, err)
-		} else {
-			utilruntime.HandleError(fmt.Errorf("error syncing item %s: %v", n, err))
-		}
-		// retry if garbage collection of an object failed.
-		gc.attemptToDelete.AddRateLimited(item)
+	}
+
+	if _, ok := err.(*restMappingError); ok {
+		// There are at least two ways this can happen:
+		// 1. The reference is to an object of a custom type that has not yet been
+		//    recognized by gc.restMapper (this is a transient error).
+		// 2. The reference is to an invalid group/version. We don't currently
+		//    have a way to distinguish this from a valid type we will recognize
+		//    after the next discovery sync.
+		// For now, record the error and retry.
+		klog.V(5).Infof("error syncing item %s: %v", n, err)
 	} else if !n.isObserved() {
 		// requeue if item hasn't been observed via an informer event yet.
 		// otherwise a virtual node for an item added AND removed during watch reestablishment can get stuck in the graph and never removed.
 		// see https://issue.k8s.io/56121
 		klog.V(5).Infof("item %s hasn't been observed via informer yet", n.identity)
-		gc.attemptToDelete.AddRateLimited(item)
+	} else {
+		utilruntime.HandleError(fmt.Errorf("error syncing item %s: %v", n, err))
 	}
+
+	// retry if garbage collection of an object failed.
+	gc.attemptToDelete.AddRateLimited(item)
 	return true
 }
 
@@ -680,7 +681,10 @@ func (gc *GarbageCollector) attemptToOrphanWorker() bool {
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("removeOrphanFinalizer for %s failed with %v", owner.identity, err))
 		gc.attemptToOrphan.AddRateLimited(item)
+		return true
 	}
+
+	gc.attemptToOrphan.Forget(item)
 	return true
 }
 
