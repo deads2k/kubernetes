@@ -296,7 +296,7 @@ func (gc *GarbageCollector) IsSynced() bool {
 }
 
 func (gc *GarbageCollector) runAttemptToDeleteWorker(ctx context.Context) {
-	for gc.attemptToDeleteWorker(ctx) {
+	for gc.processAttemptToDeleteWorker(ctx) {
 	}
 }
 
@@ -304,7 +304,7 @@ var enqueuedVirtualDeleteEventErr = goerrors.New("enqueued virtual delete event"
 
 var namespacedOwnerOfClusterScopedObjectErr = goerrors.New("cluster-scoped objects cannot refer to namespaced owners")
 
-func (gc *GarbageCollector) attemptToDeleteWorker(ctx context.Context) bool {
+func (gc *GarbageCollector) processAttemptToDeleteWorker(ctx context.Context) bool {
 	item, quit := gc.attemptToDelete.Get()
 	gc.workerLock.RLock()
 	defer gc.workerLock.RUnlock()
@@ -312,10 +312,30 @@ func (gc *GarbageCollector) attemptToDeleteWorker(ctx context.Context) bool {
 		return false
 	}
 	defer gc.attemptToDelete.Done(item)
+
+	action := gc.attemptToDeleteWorker(ctx, item)
+	switch action {
+	case forgetItem:
+		gc.attemptToDelete.Forget(item)
+	case requeueItem:
+		gc.attemptToDelete.AddRateLimited(item)
+	}
+
+	return true
+}
+
+type workQueueItemAction int
+
+const (
+	requeueItem = iota
+	forgetItem
+)
+
+func (gc *GarbageCollector) attemptToDeleteWorker(ctx context.Context, item interface{}) workQueueItemAction {
 	n, ok := item.(*node)
 	if !ok {
 		utilruntime.HandleError(fmt.Errorf("expect *node, got %#v", item))
-		return true
+		return forgetItem
 	}
 
 	if !n.isObserved() {
@@ -324,47 +344,47 @@ func (gc *GarbageCollector) attemptToDeleteWorker(ctx context.Context) bool {
 			// this can happen if attemptToDelete loops on a requeued virtual node because attemptToDeleteItem returned an error,
 			// and in the meantime a deletion of the real object associated with that uid was observed
 			klog.V(5).Infof("item %s no longer in the graph, skipping attemptToDeleteItem", n)
-			gc.attemptToDelete.Forget(item)
-			return true
+			return forgetItem
 		}
 		if nodeFromGraph.isObserved() {
 			// this can happen if attemptToDelete loops on a requeued virtual node because attemptToDeleteItem returned an error,
 			// and in the meantime the real object associated with that uid was observed
 			klog.V(5).Infof("item %s no longer virtual in the graph, skipping attemptToDeleteItem on virtual node", n)
-			gc.attemptToDelete.Forget(item)
-			return true
+			return forgetItem
 		}
 	}
 
 	err := gc.attemptToDeleteItem(ctx, n)
-	if (err == nil && n.isObserved()) || err == enqueuedVirtualDeleteEventErr || err == namespacedOwnerOfClusterScopedObjectErr {
-		// case 1: a virtual event was produced and will be handled by processGraphChanges, no need to requeue this node
-		// case 2: a cluster-scoped object referring to a namespaced owner is an error that will not resolve on retry, no need to requeue this node
-		gc.attemptToDelete.Forget(item)
-		return true
-	}
-
-	if _, ok := err.(*restMappingError); ok {
-		// There are at least two ways this can happen:
-		// 1. The reference is to an object of a custom type that has not yet been
-		//    recognized by gc.restMapper (this is a transient error).
-		// 2. The reference is to an invalid group/version. We don't currently
-		//    have a way to distinguish this from a valid type we will recognize
-		//    after the next discovery sync.
-		// For now, record the error and retry.
-		klog.V(5).Infof("error syncing item %s: %v", n, err)
+	if err == enqueuedVirtualDeleteEventErr {
+		// a virtual event was produced and will be handled by processGraphChanges, no need to requeue this node
+		return forgetItem
+	} else if err == namespacedOwnerOfClusterScopedObjectErr {
+		// a cluster-scoped object referring to a namespaced owner is an error that will not resolve on retry, no need to requeue this node
+		return forgetItem
+	} else if err != nil {
+		if _, ok := err.(*restMappingError); ok {
+			// There are at least two ways this can happen:
+			// 1. The reference is to an object of a custom type that has not yet been
+			//    recognized by gc.restMapper (this is a transient error).
+			// 2. The reference is to an invalid group/version. We don't currently
+			//    have a way to distinguish this from a valid type we will recognize
+			//    after the next discovery sync.
+			// For now, record the error and retry.
+			klog.V(5).Infof("error syncing item %s: %v", n, err)
+		} else {
+			utilruntime.HandleError(fmt.Errorf("error syncing item %s: %v", n, err))
+		}
+		// retry if garbage collection of an object failed.
+		return requeueItem
 	} else if !n.isObserved() {
 		// requeue if item hasn't been observed via an informer event yet.
 		// otherwise a virtual node for an item added AND removed during watch reestablishment can get stuck in the graph and never removed.
 		// see https://issue.k8s.io/56121
 		klog.V(5).Infof("item %s hasn't been observed via informer yet", n.identity)
-	} else {
-		utilruntime.HandleError(fmt.Errorf("error syncing item %s: %v", n, err))
+		return requeueItem
 	}
 
-	// retry if garbage collection of an object failed.
-	gc.attemptToDelete.AddRateLimited(item)
-	return true
+	return forgetItem
 }
 
 // isDangling check if a reference is pointing to an object that doesn't exist.
@@ -648,16 +668,16 @@ func (gc *GarbageCollector) orphanDependents(owner objectReference, dependents [
 }
 
 func (gc *GarbageCollector) runAttemptToOrphanWorker() {
-	for gc.attemptToOrphanWorker() {
+	for gc.processAttemptToOrphanWorker() {
 	}
 }
 
-// attemptToOrphanWorker dequeues a node from the attemptToOrphan, then finds its
+// processAttemptToOrphanWorker dequeues a node from the attemptToOrphan, then finds its
 // dependents based on the graph maintained by the GC, then removes it from the
 // OwnerReferences of its dependents, and finally updates the owner to remove
 // the "Orphan" finalizer. The node is added back into the attemptToOrphan if any of
 // these steps fail.
-func (gc *GarbageCollector) attemptToOrphanWorker() bool {
+func (gc *GarbageCollector) processAttemptToOrphanWorker() bool {
 	item, quit := gc.attemptToOrphan.Get()
 	gc.workerLock.RLock()
 	defer gc.workerLock.RUnlock()
@@ -665,10 +685,23 @@ func (gc *GarbageCollector) attemptToOrphanWorker() bool {
 		return false
 	}
 	defer gc.attemptToOrphan.Done(item)
+
+	action := gc.attemptToOrphanWorker(item)
+	switch action {
+	case forgetItem:
+		gc.attemptToOrphan.Forget(item)
+	case requeueItem:
+		gc.attemptToOrphan.AddRateLimited(item)
+	}
+
+	return true
+}
+
+func (gc *GarbageCollector) attemptToOrphanWorker(item interface{}) workQueueItemAction {
 	owner, ok := item.(*node)
 	if !ok {
 		utilruntime.HandleError(fmt.Errorf("expect *node, got %#v", item))
-		return true
+		return forgetItem
 	}
 	// we don't need to lock each element, because they never get updated
 	owner.dependentsLock.RLock()
@@ -681,19 +714,15 @@ func (gc *GarbageCollector) attemptToOrphanWorker() bool {
 	err := gc.orphanDependents(owner.identity, dependents)
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("orphanDependents for %s failed with %v", owner.identity, err))
-		gc.attemptToOrphan.AddRateLimited(item)
-		return true
+		return requeueItem
 	}
 	// update the owner, remove "orphaningFinalizer" from its finalizers list
 	err = gc.removeFinalizer(owner, metav1.FinalizerOrphanDependents)
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("removeOrphanFinalizer for %s failed with %v", owner.identity, err))
-		gc.attemptToOrphan.AddRateLimited(item)
-		return true
+		return requeueItem
 	}
-
-	gc.attemptToOrphan.Forget(item)
-	return true
+	return forgetItem
 }
 
 // *FOR TEST USE ONLY*

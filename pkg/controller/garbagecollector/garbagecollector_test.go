@@ -454,7 +454,7 @@ func TestDependentsRace(t *testing.T) {
 	go func() {
 		gc.attemptToOrphan.Add(owner)
 		for i := 0; i < updates; i++ {
-			gc.attemptToOrphanWorker()
+			gc.processAttemptToOrphanWorker()
 		}
 	}()
 }
@@ -2438,7 +2438,7 @@ func processAttemptToDelete(count int) step {
 			if count <= 0 {
 				// process all
 				for ctx.gc.dependencyGraphBuilder.attemptToDelete.Len() != 0 {
-					ctx.gc.attemptToDeleteWorker(context.TODO())
+					ctx.gc.processAttemptToDeleteWorker(context.TODO())
 				}
 			} else {
 				for i := 0; i < count; i++ {
@@ -2446,7 +2446,7 @@ func processAttemptToDelete(count int) step {
 						ctx.t.Errorf("expected at least %d pending changes, got %d", count, i+1)
 						return
 					}
-					ctx.gc.attemptToDeleteWorker(context.TODO())
+					ctx.gc.processAttemptToDeleteWorker(context.TODO())
 				}
 			}
 		},
