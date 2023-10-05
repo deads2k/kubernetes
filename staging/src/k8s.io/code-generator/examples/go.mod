@@ -54,6 +54,7 @@ replace (
 	k8s.io/api => ../../api
 	k8s.io/apimachinery => ../../apimachinery
 	k8s.io/client-go => ../../client-go
+	k8s.io/component-base => ../../component-base
 )
 
 replace k8s.io/klog/v2 => github.com/pohly/klog/v2 v2.40.2-0.20231026184525-77259d15f4f0
