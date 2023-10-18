@@ -959,8 +959,8 @@ func init() {
 	runtime.Must(utilfeature.DefaultMutableFeatureGate.Add(defaultKubernetesFeatureGates))
 
 	// replace client-go's feature gate implementation with kube's
-	runtime.Must(clientgofeaturegate.AddFeaturesToExistingFeatureGates(&clientFeatureGateAdapter{utilfeature.DefaultMutableFeatureGate}))
-	clientgofeaturegate.SetFeatureGates(&clientFeatureGateAdapter{utilfeature.DefaultMutableFeatureGate})
+	runtime.Must(clientgofeaturegate.AddFeaturesToExistingFeatureGates(utilfeature.DefaultMutableFeatureGate))
+	clientgofeaturegate.SetFeatureGates(utilfeature.DefaultMutableFeatureGate)
 }
 
 // defaultKubernetesFeatureGates consists of all known Kubernetes-specific feature keys.

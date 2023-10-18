@@ -15,29 +15,8 @@ package features
 
 import (
 	"sync/atomic"
-)
 
-type Feature string
-
-type FeatureSpec struct {
-	// Default is the default enablement state for the feature
-	Default bool
-	// LockToDefault indicates that the feature is locked to its default and cannot be changed
-	LockToDefault bool
-	// PreRelease indicates the maturity level of the feature
-	PreRelease prerelease
-}
-
-type prerelease string
-
-const (
-	// Values for PreRelease.
-	Alpha = prerelease("ALPHA")
-	Beta  = prerelease("BETA")
-	GA    = prerelease("")
-
-	// Deprecated
-	Deprecated = prerelease("DEPRECATED")
+	"k8s.io/component-base/featuregate"
 )
 
 const (
@@ -57,7 +36,7 @@ const (
 	// beta: v1.29
 	//
 	// Allow the API server to stream individual items instead of chunking
-	WatchList Feature = "WatchListClient"
+	WatchList featuregate.Feature = "WatchListClient"
 )
 
 // DefaultFeatureGates returns the feature gates exposed by this library.
@@ -71,12 +50,12 @@ const (
 //
 // Please note that the actual set of the features gates
 // might be overwritten by calling SetFeatureGates method.
-func DefaultFeatureGates() Reader {
-	return featureGates.Load().(Reader)
+func DefaultFeatureGates() featuregate.Reader {
+	return featureGates.Load().(featuregate.Reader)
 }
 
 type FeatureRegistry interface {
-	Add(map[Feature]FeatureSpec) error
+	Add(map[featuregate.Feature]featuregate.FeatureSpec) error
 }
 
 // AddFeaturesToExistingFeatureGates adds the default feature gates to the provided set.
@@ -92,13 +71,13 @@ func AddFeaturesToExistingFeatureGates(featureRegistry FeatureRegistry) error {
 // Useful for binaries that would like to have full control of the features
 // exposed by this library. For example to allow consumers of a binary
 // to interact with the features via a command line flag.
-func SetFeatureGates(newFeatureGates Reader) {
+func SetFeatureGates(newFeatureGates featuregate.Reader) {
 	wrappedFeatureGate := &featureGateWrapper{newFeatureGates}
 	featureGates.Store(wrappedFeatureGate)
 }
 
 func init() {
-	envVarGates := newEnvVarFeatureGate(defaultKubernetesFeatureGates)
+	envVarGates := featuregate.NewEnvVarFeatureGate(defaultKubernetesFeatureGates)
 
 	wrappedFeatureGate := &featureGateWrapper{envVarGates}
 	featureGates.Store(wrappedFeatureGate)
@@ -106,7 +85,7 @@ func init() {
 
 // featureGateWrapper a thin wrapper to satisfy featureGates variable (atomic.Value)
 type featureGateWrapper struct {
-	Reader
+	featuregate.Reader
 }
 
 var (
@@ -121,6 +100,6 @@ var (
 //
 // To add a new feature, define a key for it above and add it here. The features will be
 // available throughout Kubernetes binaries.
-var defaultKubernetesFeatureGates = map[Feature]FeatureSpec{
-	WatchList: {Default: false, PreRelease: Beta},
+var defaultKubernetesFeatureGates = map[featuregate.Feature]featuregate.FeatureSpec{
+	WatchList: {Default: false, PreRelease: featuregate.Beta},
 }
