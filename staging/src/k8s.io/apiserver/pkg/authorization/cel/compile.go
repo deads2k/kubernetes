@@ -18,6 +18,7 @@ package cel
 
 import (
 	"fmt"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types/ref"
@@ -167,6 +168,8 @@ func buildResourceAttributesType(field func(name string, declType *apiservercel.
 		field("group", apiservercel.StringType, false),
 		field("version", apiservercel.StringType, false),
 		field("resource", apiservercel.StringType, false),
+		field("fieldSelector", apiservercel.StringType, false),
+		field("labelSelector", apiservercel.StringType, false),
 		field("subresource", apiservercel.StringType, false),
 		field("name", apiservercel.StringType, false),
 	))
@@ -203,6 +206,28 @@ func convertObjectToUnstructured(obj *authorizationv1.SubjectAccessReviewSpec) m
 			"subresource": obj.ResourceAttributes.Subresource,
 			"name":        obj.ResourceAttributes.Name,
 		}
+
+		if obj.ResourceAttributes.FieldSelector != nil {
+			if len(obj.ResourceAttributes.FieldSelector.Requirements) > 0 {
+
+			} else if len(obj.ResourceAttributes.FieldSelector.RawSelector) > 0 {
+				ret["fieldSelector"] = obj.ResourceAttributes.FieldSelector.RawSelector
+			}
+		}
+		if obj.ResourceAttributes.LabelSelector != nil {
+			if len(obj.ResourceAttributes.LabelSelector.Requirements) > 0 {
+				selector := &metav1.LabelSelector{MatchExpressions: obj.ResourceAttributes.LabelSelector.Requirements}
+				labelSelector, err := metav1.LabelSelectorAsSelector(selector)
+				// if we cannot produce a selector from the expressions, then authorization will use the unrestricted check
+				if err == nil {
+					ret["labelSelector"] = labelSelector.String()
+				}
+
+			} else if len(obj.ResourceAttributes.LabelSelector.RawSelector) > 0 {
+				ret["labelSelector"] = obj.ResourceAttributes.LabelSelector.RawSelector
+			}
+		}
+
 	}
 	if obj.NonResourceAttributes != nil {
 		ret["nonResourceAttributes"] = map[string]string{
