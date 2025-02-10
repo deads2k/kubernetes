@@ -170,6 +170,17 @@ func (p *podEvaluator) Handles(a admission.Attributes) bool {
 	op := a.GetOperation()
 	switch a.GetSubresource() {
 	case "":
+		if op == admission.Update {
+			pod, err1 := toExternalPodOrError(a.GetObject())
+			oldPod, err2 := toExternalPodOrError(a.GetOldObject())
+			if err1 != nil || err2 != nil {
+				return false
+			}
+			// Scope changed
+			if (pod.Spec.ActiveDeadlineSeconds == nil) != (oldPod.Spec.ActiveDeadlineSeconds == nil) {
+				return true
+			}
+		}
 		return op == admission.Create
 	case "resize":
 		return op == admission.Update

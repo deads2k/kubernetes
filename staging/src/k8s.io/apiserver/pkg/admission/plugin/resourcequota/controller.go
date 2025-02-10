@@ -440,7 +440,7 @@ func CheckRequest(quotas []corev1.ResourceQuota, a admission.Attributes, evaluat
 	// reject if we match the quota, but usage is not calculated yet
 	// reject if the input object does not satisfy quota constraints
 	// if there are no pertinent quotas, we can just return
-	interestingQuotaIndexes := []int{}
+	interestingQuotaIndexes := sets.New[int]()
 	// track the cumulative set of resources that were required across all quotas
 	// this is needed to know if we have satisfied any constraints where consumption
 	// was limited by default.
@@ -473,7 +473,7 @@ func CheckRequest(quotas []corev1.ResourceQuota, a admission.Attributes, evaluat
 		if !hasUsageStats(&resourceQuota, restrictedResources) {
 			return nil, admission.NewForbidden(a, fmt.Errorf("status unknown for quota: %s, resources: %s", resourceQuota.Name, prettyPrintResourceNames(restrictedResources)))
 		}
-		interestingQuotaIndexes = append(interestingQuotaIndexes, i)
+		interestingQuotaIndexes = interestingQuotaIndexes.Insert(i)
 		localRestrictedResourcesSet := quota.ToSet(restrictedResources)
 		restrictedResourcesSet.Insert(localRestrictedResourcesSet.List()...)
 	}
@@ -492,14 +492,20 @@ func CheckRequest(quotas []corev1.ResourceQuota, a admission.Attributes, evaluat
 	// as a result, we need to measure the usage of this object for quota
 	// on updates, we need to subtract the previous measured usage
 	// if usage shows no change, just return since it has no impact on quota
-	deltaUsage, err := evaluator.Usage(inputObject)
+	inputUsage, err := evaluator.Usage(inputObject)
 	if err != nil {
 		return quotas, err
 	}
 
 	// ensure that usage for input object is never negative (this would mean a resource made a negative resource requirement)
-	if negativeUsage := quota.IsNegative(deltaUsage); len(negativeUsage) > 0 {
+	if negativeUsage := quota.IsNegative(inputUsage); len(negativeUsage) > 0 {
 		return nil, admission.NewForbidden(a, fmt.Errorf("quota usage is negative for resource(s): %s", prettyPrintResourceNames(negativeUsage)))
+	}
+
+	// initialize a map of delta usage for each interestin quota index.
+	deltaUsageIndexMap := make(map[int]corev1.ResourceList, len(interestingQuotaIndexes))
+	for index := range interestingQuotaIndexes {
+		deltaUsageIndexMap[index] = inputUsage
 	}
 
 	if admission.Update == a.GetOperation() {
@@ -516,14 +522,34 @@ func CheckRequest(quotas []corev1.ResourceQuota, a admission.Attributes, evaluat
 			if innerErr != nil {
 				return quotas, innerErr
 			}
-			deltaUsage = quota.SubtractWithNonNegativeResult(deltaUsage, prevUsage)
+
+			deltaUsage := quota.SubtractWithNonNegativeResult(inputUsage, prevUsage)
+			for index := range interestingQuotaIndexes {
+				resourceQuota := quotas[index]
+				match, err := evaluator.Matches(&resourceQuota, prevItem)
+				if err != nil {
+					klog.ErrorS(err, "Error occurred while matching resource quota against the existing object",
+						"resourceQuota", resourceQuota)
+					return quotas, err
+				}
+				if match {
+					deltaUsageIndexMap[index] = deltaUsage
+				}
+			}
 		}
 	}
 
-	// ignore items in deltaUsage with zero usage
-	deltaUsage = quota.RemoveZeros(deltaUsage)
+	// ignore items in deltaUsageIndexMap with zero usage,
+	// as they will not impact the quota.
+	for index := range interestingQuotaIndexes {
+		deltaUsageIndexMap[index] = quota.RemoveZeros(deltaUsageIndexMap[index])
+		if len(deltaUsageIndexMap[index]) == 0 {
+			delete(deltaUsageIndexMap, index)
+			delete(interestingQuotaIndexes, index)
+		}
+	}
 	// if there is no remaining non-zero usage, short-circuit and return
-	if len(deltaUsage) == 0 {
+	if len(deltaUsageIndexMap) == 0 {
 		return quotas, nil
 	}
 
@@ -555,8 +581,9 @@ func CheckRequest(quotas []corev1.ResourceQuota, a admission.Attributes, evaluat
 		return nil, err
 	}
 
-	for _, index := range interestingQuotaIndexes {
+	for index := range interestingQuotaIndexes {
 		resourceQuota := outQuotas[index]
+		deltaUsage := deltaUsageIndexMap[index]
 
 		hardResources := quota.ResourceNames(resourceQuota.Status.Hard)
 		requestedUsage := quota.Mask(deltaUsage, hardResources)
