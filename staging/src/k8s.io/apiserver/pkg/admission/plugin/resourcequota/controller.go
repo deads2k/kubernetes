@@ -502,10 +502,14 @@ func CheckRequest(quotas []corev1.ResourceQuota, a admission.Attributes, evaluat
 		return nil, admission.NewForbidden(a, fmt.Errorf("quota usage is negative for resource(s): %s", prettyPrintResourceNames(negativeUsage)))
 	}
 
-	// initialize a map of delta usage for each interestin quota index.
+	// initialize a map of delta usage for each interesting quota index.
 	deltaUsageIndexMap := make(map[int]corev1.ResourceList, len(interestingQuotaIndexes))
 	for index := range interestingQuotaIndexes {
 		deltaUsageIndexMap[index] = inputUsage
+	}
+	var deltaUsageWhenNoInterestingQuota corev1.ResourceList
+	if admission.Create == a.GetOperation() && len(interestingQuotaIndexes) == 0 {
+		deltaUsageWhenNoInterestingQuota = inputUsage
 	}
 
 	if admission.Update == a.GetOperation() {
@@ -517,40 +521,55 @@ func CheckRequest(quotas []corev1.ResourceQuota, a admission.Attributes, evaluat
 		// if we can definitively determine that this is not a case of "create on update",
 		// then charge based on the delta.  Otherwise, bill the maximum
 		metadata, err := meta.Accessor(prevItem)
-		if err == nil && len(metadata.GetResourceVersion()) > 0 {
-			prevUsage, innerErr := evaluator.Usage(prevItem)
-			if innerErr != nil {
-				return quotas, innerErr
-			}
+		if err == nil {
+			if len(metadata.GetResourceVersion()) > 0 {
+				prevUsage, innerErr := evaluator.Usage(prevItem)
+				if innerErr != nil {
+					return quotas, innerErr
+				}
 
-			deltaUsage := quota.SubtractWithNonNegativeResult(inputUsage, prevUsage)
-			for index := range interestingQuotaIndexes {
-				resourceQuota := quotas[index]
-				match, err := evaluator.Matches(&resourceQuota, prevItem)
-				if err != nil {
-					klog.ErrorS(err, "Error occurred while matching resource quota against the existing object",
-						"resourceQuota", resourceQuota)
-					return quotas, err
+				deltaUsage := quota.SubtractWithNonNegativeResult(inputUsage, prevUsage)
+				if len(interestingQuotaIndexes) == 0 {
+					deltaUsageWhenNoInterestingQuota = deltaUsage
 				}
-				if match {
-					deltaUsageIndexMap[index] = deltaUsage
+
+				for index := range interestingQuotaIndexes {
+					resourceQuota := quotas[index]
+					match, err := evaluator.Matches(&resourceQuota, prevItem)
+					if err != nil {
+						klog.ErrorS(err, "Error occurred while matching resource quota against the existing object",
+							"resourceQuota", resourceQuota)
+						return quotas, err
+					}
+					if match {
+						deltaUsageIndexMap[index] = deltaUsage
+					}
 				}
+			} else if len(interestingQuotaIndexes) == 0 {
+				deltaUsageWhenNoInterestingQuota = inputUsage
 			}
 		}
 	}
 
 	// ignore items in deltaUsageIndexMap with zero usage,
 	// as they will not impact the quota.
-	for index := range interestingQuotaIndexes {
+	for index := range deltaUsageIndexMap {
 		deltaUsageIndexMap[index] = quota.RemoveZeros(deltaUsageIndexMap[index])
 		if len(deltaUsageIndexMap[index]) == 0 {
 			delete(deltaUsageIndexMap, index)
-			delete(interestingQuotaIndexes, index)
 		}
 	}
+
 	// if there is no remaining non-zero usage, short-circuit and return
-	if len(deltaUsageIndexMap) == 0 {
-		return quotas, nil
+	if len(interestingQuotaIndexes) != 0 {
+		if len(deltaUsageIndexMap) == 0 {
+			return quotas, nil
+		}
+	} else {
+		deltaUsage := quota.RemoveZeros(deltaUsageWhenNoInterestingQuota)
+		if len(deltaUsage) == 0 {
+			return quotas, nil
+		}
 	}
 
 	// verify that for every resource that had limited by default consumption
@@ -583,7 +602,10 @@ func CheckRequest(quotas []corev1.ResourceQuota, a admission.Attributes, evaluat
 
 	for index := range interestingQuotaIndexes {
 		resourceQuota := outQuotas[index]
-		deltaUsage := deltaUsageIndexMap[index]
+		deltaUsage, ok := deltaUsageIndexMap[index]
+		if !ok {
+			continue
+		}
 
 		hardResources := quota.ResourceNames(resourceQuota.Status.Hard)
 		requestedUsage := quota.Mask(deltaUsage, hardResources)
