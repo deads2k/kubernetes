@@ -1434,8 +1434,7 @@ var _ = SIGDescribe("ResourceQuota", func() {
 		usedResources[v1.ResourceRequestsMemory] = resource.MustParse("0")
 		usedResources[v1.ResourceLimitsCPU] = resource.MustParse("0")
 		usedResources[v1.ResourceLimitsMemory] = resource.MustParse("0")
-		// FIXME: controller takes longer time to update the resource quota status than expected
-		err = waitForResourceQuotaWithTimeout(ctx, f.ClientSet, f.Namespace.Name, resourceQuotaNotTerminating.Name, usedResources, 5*time.Minute)
+		err = waitForResourceQuota(ctx, f.ClientSet, f.Namespace.Name, resourceQuotaNotTerminating.Name, usedResources)
 		framework.ExpectNoError(err)
 
 		ginkgo.By("Deleting the pod")
@@ -2250,8 +2249,8 @@ func countResourceQuota(ctx context.Context, c clientset.Interface, namespace st
 }
 
 // wait for resource quota status to show the expected used resources value
-func waitForResourceQuotaWithTimeout(ctx context.Context, c clientset.Interface, ns, quotaName string, used v1.ResourceList, timeout time.Duration) error {
-	return wait.PollUntilContextTimeout(ctx, framework.Poll, timeout, false, func(ctx context.Context) (bool, error) {
+func waitForResourceQuota(ctx context.Context, c clientset.Interface, ns, quotaName string, used v1.ResourceList) error {
+	return wait.PollUntilContextTimeout(ctx, framework.Poll, resourceQuotaTimeout, false, func(ctx context.Context) (bool, error) {
 		resourceQuota, err := c.CoreV1().ResourceQuotas(ns).Get(ctx, quotaName, metav1.GetOptions{})
 		if err != nil {
 			return false, err
@@ -2269,11 +2268,6 @@ func waitForResourceQuotaWithTimeout(ctx context.Context, c clientset.Interface,
 		}
 		return true, nil
 	})
-}
-
-// wait for resource quota status to show the expected used resources value
-func waitForResourceQuota(ctx context.Context, c clientset.Interface, ns, quotaName string, used v1.ResourceList) error {
-	return waitForResourceQuotaWithTimeout(ctx, c, ns, quotaName, used, resourceQuotaTimeout)
 }
 
 // updateResourceQuotaUntilUsageAppears updates the resource quota object until the usage is populated
