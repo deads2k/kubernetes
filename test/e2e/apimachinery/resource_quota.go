@@ -1367,13 +1367,14 @@ var _ = SIGDescribe("ResourceQuota", func() {
 		err = waitForResourceQuota(ctx, f.ClientSet, f.Namespace.Name, resourceQuotaNotTerminating.Name, usedResources)
 		framework.ExpectNoError(err)
 
-		podName1 := "test-pod"
 		requests := v1.ResourceList{}
 		requests[v1.ResourceCPU] = resource.MustParse("500m")
 		requests[v1.ResourceMemory] = resource.MustParse("200Mi")
 		limits := v1.ResourceList{}
 		limits[v1.ResourceCPU] = resource.MustParse("1")
 		limits[v1.ResourceMemory] = resource.MustParse("400Mi")
+
+		podName1 := "test-pod"
 		pod1 := newTestPodForQuota(f, podName1, requests, limits)
 
 		podName2 := "terminating-pod"

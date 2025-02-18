@@ -440,7 +440,7 @@ func CheckRequest(quotas []corev1.ResourceQuota, a admission.Attributes, evaluat
 	// reject if we match the quota, but usage is not calculated yet
 	// reject if the input object does not satisfy quota constraints
 	// if there are no pertinent quotas, we can just return
-	interestingQuotaIndexes := sets.New[int]()
+	interestingQuotaIndexes := []int{}
 	// track the cumulative set of resources that were required across all quotas
 	// this is needed to know if we have satisfied any constraints where consumption
 	// was limited by default.
@@ -473,7 +473,7 @@ func CheckRequest(quotas []corev1.ResourceQuota, a admission.Attributes, evaluat
 		if !hasUsageStats(&resourceQuota, restrictedResources) {
 			return nil, admission.NewForbidden(a, fmt.Errorf("status unknown for quota: %s, resources: %s", resourceQuota.Name, prettyPrintResourceNames(restrictedResources)))
 		}
-		interestingQuotaIndexes = interestingQuotaIndexes.Insert(i)
+		interestingQuotaIndexes = append(interestingQuotaIndexes, i)
 		localRestrictedResourcesSet := quota.ToSet(restrictedResources)
 		restrictedResourcesSet.Insert(localRestrictedResourcesSet.List()...)
 	}
@@ -504,7 +504,7 @@ func CheckRequest(quotas []corev1.ResourceQuota, a admission.Attributes, evaluat
 
 	// initialize a map of delta usage for each interesting quota index.
 	deltaUsageIndexMap := make(map[int]corev1.ResourceList, len(interestingQuotaIndexes))
-	for index := range interestingQuotaIndexes {
+	for _, index := range interestingQuotaIndexes {
 		deltaUsageIndexMap[index] = inputUsage
 	}
 	var deltaUsageWhenNoInterestingQuota corev1.ResourceList
@@ -533,7 +533,7 @@ func CheckRequest(quotas []corev1.ResourceQuota, a admission.Attributes, evaluat
 					deltaUsageWhenNoInterestingQuota = deltaUsage
 				}
 
-				for index := range interestingQuotaIndexes {
+				for _, index := range interestingQuotaIndexes {
 					resourceQuota := quotas[index]
 					match, err := evaluator.Matches(&resourceQuota, prevItem)
 					if err != nil {
@@ -600,7 +600,7 @@ func CheckRequest(quotas []corev1.ResourceQuota, a admission.Attributes, evaluat
 		return nil, err
 	}
 
-	for index := range interestingQuotaIndexes {
+	for _, index := range interestingQuotaIndexes {
 		resourceQuota := outQuotas[index]
 		deltaUsage, ok := deltaUsageIndexMap[index]
 		if !ok {
